@@ -4,6 +4,8 @@ import ReactTestRenderer, { act } from 'react-test-renderer';
 import SmsReaderScreen from '../src/screens/SmsReaderScreen';
 import {
   getAllMessages,
+  getPinnedChats,
+  setChatPinned,
   getInboxMessages,
   getMessagesForAddress,
 } from '../src/screens/smsReader';
@@ -11,6 +13,8 @@ import { requestSmsPermission } from '../src/screens/permission';
 
 jest.mock('../src/screens/smsReader', () => ({
   getAllMessages: jest.fn(),
+  getPinnedChats: jest.fn(),
+  setChatPinned: jest.fn(),
   getInboxMessages: jest.fn(),
   getMessagesForAddress: jest.fn(),
 }));
@@ -39,6 +43,13 @@ const sent = {
 
 beforeEach(() => {
   jest.clearAllMocks();
+  let savedPins: string[] = [];
+  jest.mocked(getPinnedChats).mockImplementation(async () => [...savedPins]);
+  jest.mocked(setChatPinned).mockImplementation(async (address, pinned) => {
+    savedPins = savedPins.filter(value => value !== address);
+    if (pinned) savedPins.push(address);
+    return [...savedPins];
+  });
   Platform.OS = 'android';
   jest.mocked(requestSmsPermission).mockResolvedValue(true);
   jest.mocked(getInboxMessages).mockResolvedValue([received]);
@@ -127,6 +138,59 @@ test('shows permission failure without querying SMS', async () => {
         String(node.props.children).includes('SMS permission was not granted'),
       ),
   ).toBe(true);
+  await act(async () => {
+    renderer.unmount();
+  });
+});
+
+test('pins multiple chats inside the app, restores them, and hides Premium after unpinning all', async () => {
+  let renderer!: ReactTestRenderer.ReactTestRenderer;
+  const mount = async () => {
+    await act(async () => {
+      renderer = ReactTestRenderer.create(<SmsReaderScreen />);
+    });
+  };
+  const premiumVisible = () =>
+    renderer.root
+      .findAllByType(Text)
+      .some(node => node.props.children === 'Premium');
+  const press = async (label?: string) => {
+    await act(async () => {
+      const button = renderer.root.findAll(
+        node =>
+          node.props.accessibilityRole === 'button' &&
+          typeof node.props.onPress === 'function' &&
+          (!label || node.props.accessibilityLabel === label),
+      )[0];
+      expect(button).toBeDefined();
+      button.props.onPress();
+    });
+  };
+  await mount();
+  expect(premiumVisible()).toBe(false);
+  await press();
+  await press('Pin chat with VM-BANK');
+  await press('Pin chat with +919876543210');
+  expect(setChatPinned).toHaveBeenCalledWith('VM-BANK', true);
+  await press();
+  expect(premiumVisible()).toBe(true);
+  await act(async () => {
+    renderer.unmount();
+  });
+  await mount();
+  expect(premiumVisible()).toBe(true);
+  await press('Open pinned chat with VM-BANK');
+  expect(getMessagesForAddress).toHaveBeenCalledWith('VM-BANK', 0);
+  await press();
+  await press('Unpin chat with VM-BANK');
+  expect(premiumVisible()).toBe(true);
+  await press('Unpin chat with +919876543210');
+  expect(premiumVisible()).toBe(false);
+  await act(async () => {
+    renderer.unmount();
+  });
+  await mount();
+  expect(premiumVisible()).toBe(false);
   await act(async () => {
     renderer.unmount();
   });

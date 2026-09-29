@@ -8,6 +8,8 @@ import React, {
 import {
   ActivityIndicator,
   Alert,
+  AppState,
+  ScrollView,
   BackHandler,
   FlatList,
   Platform,
@@ -89,6 +91,13 @@ export default function SmsReaderScreen() {
     setPage(page === 'conversation' ? returnPage : 'inbox');
     return true;
   }, [page, returnPage]);
+
+  useEffect(() => {
+    const subscription = AppState.addEventListener('change', state => {
+      if (state === 'active') setReload(value => value + 1);
+    });
+    return () => subscription.remove();
+  }, []);
 
   useEffect(() => {
     const subscription = BackHandler.addEventListener(
@@ -312,41 +321,72 @@ export default function SmsReaderScreen() {
               {page === 'inbox' && pins.length > 0 && (
                 <View style={styles.premium}>
                   <Text style={styles.premiumTitle}>Premium</Text>
-                  <Text style={styles.meta}>Pinned chats · {pins.length}</Text>
-                  {pins.map(sender => (
-                    <View key={sender} style={styles.row}>
-                      <Pressable
-                        accessibilityRole="button"
-                        accessibilityLabel={`Open pinned chat with ${sender}`}
-                        onPress={() => openConversation(sender)}
-                      >
-                        <Text style={styles.address}>{sender}</Text>
-                        {pinPreviews[sender] ? (
-                          <>
-                            <Text numberOfLines={2} style={styles.body}>
-                              {pinPreviews[sender].body}
+                  <Text style={styles.premiumSubtitle}>
+                    Pinned chats · {pins.length} · Swipe to browse
+                  </Text>
+                  <ScrollView
+                    horizontal
+                    showsHorizontalScrollIndicator={false}
+                    contentContainerStyle={styles.pinnedRow}
+                  >
+                    {pins.map(sender => {
+                      const preview = pinPreviews[sender];
+                      const today =
+                        !!preview &&
+                        new Date(preview.date).toDateString() ===
+                          new Date().toDateString();
+                      const ink = today ? styles.todayInk : styles.olderInk;
+                      return (
+                        <View
+                          key={sender}
+                          style={[
+                            styles.pinnedCard,
+                            today ? styles.todayCard : styles.olderCard,
+                          ]}
+                        >
+                          <Pressable
+                            accessibilityRole="button"
+                            accessibilityLabel={`Open pinned chat with ${sender}`}
+                            onPress={() => openConversation(sender)}
+                          >
+                            <Text style={[styles.cardStatus, ink]}>
+                              {today
+                                ? '●  MESSAGE TODAY'
+                                : '○  NO MESSAGES TODAY'}
                             </Text>
-                            <Text style={styles.meta}>
-                              {new Date(
-                                pinPreviews[sender].date,
-                              ).toLocaleString()}
+                            <Text
+                              numberOfLines={1}
+                              style={[styles.cardSender, ink]}
+                            >
+                              {sender}
                             </Text>
-                          </>
-                        ) : (
-                          <Text style={styles.meta}>Open conversation</Text>
-                        )}
-                      </Pressable>
-                      <Pressable
-                        accessibilityRole="button"
-                        accessibilityLabel={`Unpin chat with ${sender}`}
-                        disabled={savingPin}
-                        style={styles.pinButton}
-                        onPress={() => togglePin(sender)}
-                      >
-                        <Text style={styles.pinText}>Unpin chat</Text>
-                      </Pressable>
-                    </View>
-                  ))}
+                            <Text
+                              numberOfLines={1}
+                              style={[styles.cardPreview, ink]}
+                            >
+                              {preview?.body || 'Open conversation'}
+                            </Text>
+                            <Text style={[styles.cardDate, ink]}>
+                              {preview
+                                ? new Date(preview.date).toLocaleString()
+                                : 'No messages available'}
+                            </Text>
+                          </Pressable>
+                          <Pressable
+                            accessibilityRole="button"
+                            accessibilityLabel={`Unpin chat with ${sender}`}
+                            disabled={savingPin}
+                            style={styles.cardUnpin}
+                            onPress={() => togglePin(sender)}
+                          >
+                            <Text style={[styles.cardUnpinText, ink]}>
+                              Unpin
+                            </Text>
+                          </Pressable>
+                        </View>
+                      );
+                    })}
+                  </ScrollView>
                 </View>
               )}
               <Text style={styles.meta}>
@@ -392,10 +432,36 @@ const styles = StyleSheet.create({
     padding: 12,
     gap: 10,
     borderRadius: 12,
-    backgroundColor: '#fef3c7',
+    backgroundColor: '#0f172a',
     marginBottom: 16,
   },
-  premiumTitle: { fontSize: 20, fontWeight: '700', color: '#78350f' },
+  premiumTitle: { fontSize: 20, fontWeight: '700', color: '#fff' },
+  premiumSubtitle: { fontSize: 12, color: '#cbd5e1' },
+  pinnedRow: { gap: 12, paddingBottom: 4 },
+  pinnedCard: {
+    width: 250,
+    padding: 12,
+    borderRadius: 16,
+    borderWidth: 1,
+    borderColor: '#ffffff33',
+  },
+  todayCard: { backgroundColor: '#31AAA9' },
+  olderCard: { backgroundColor: '#A82020' },
+  todayInk: { color: '#062c2c' },
+  olderInk: { color: '#fff' },
+  cardStatus: { fontSize: 10, fontWeight: '800', letterSpacing: 0.8 },
+  cardSender: { fontSize: 16, fontWeight: '700', marginTop: 6 },
+  cardPreview: { fontSize: 13, marginTop: 4 },
+  cardDate: { fontSize: 11, marginTop: 5 },
+  cardUnpin: {
+    alignSelf: 'flex-end',
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    marginTop: 4,
+    borderRadius: 20,
+    backgroundColor: '#ffffff22',
+  },
+  cardUnpinText: { fontSize: 12, fontWeight: '600' },
   pinButton: {
     alignSelf: 'flex-start',
     padding: 10,
