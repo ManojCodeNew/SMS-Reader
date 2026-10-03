@@ -1,7 +1,9 @@
 import React from 'react';
 import { Platform, Text, TextInput } from 'react-native';
 import ReactTestRenderer, { act } from 'react-test-renderer';
-import SmsReaderScreen from '../src/screens/SmsReaderScreen';
+import SmsReaderScreen, {
+  conversationDay,
+} from '../src/screens/SmsReaderScreen';
 import {
   getAllMessages,
   getPinnedChats,
@@ -194,4 +196,18 @@ test('pins multiple chats inside the app, restores them, and hides Premium after
   await act(async () => {
     renderer.unmount();
   });
+});
+
+test('classifies local calendar days across a month boundary', () => {
+  const now = new Date(2026, 9, 1, 0, 5);
+  expect(conversationDay(new Date(2026, 9, 1, 0, 1).getTime(), now)).toBe(
+    'today',
+  );
+  expect(conversationDay(new Date(2026, 8, 30, 23, 59).getTime(), now)).toBe(
+    'yesterday',
+  );
+  expect(conversationDay(new Date(2026, 8, 29, 23, 59).getTime(), now)).toBe(
+    'older',
+  );
+  expect(conversationDay(undefined, now)).toBe('older');
 });

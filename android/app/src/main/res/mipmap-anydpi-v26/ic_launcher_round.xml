@@ -1,0 +1,4 @@
+<adaptive-icon xmlns:android="http://schemas.android.com/apk/res/android">
+    <background android:drawable="@color/sms_icon_background" />
+    <foreground android:drawable="@drawable/sms_icon_foreground" />
+</adaptive-icon>

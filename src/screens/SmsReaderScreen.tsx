@@ -30,6 +30,19 @@ import {
 } from './smsReader';
 import { requestSmsPermission } from './permission';
 
+export function conversationDay(date: number | undefined, now = new Date()) {
+  if (date === undefined) return 'older';
+  const day = new Date(date).toDateString();
+  if (day === now.toDateString()) return 'today';
+  const yesterday = new Date(now);
+  yesterday.setDate(yesterday.getDate() - 1);
+  return day === yesterday.toDateString() ? 'yesterday' : 'older';
+}
+
+function CountBadge({ label }: { label: string }) {
+  return <Text style={styles.countBadge}>{label}</Text>;
+}
+
 type Page = 'inbox' | 'search' | 'conversation';
 
 function messageError(error: unknown) {
@@ -64,6 +77,8 @@ export default function SmsReaderScreen() {
   const [pinPreviews, setPinPreviews] = useState<Record<string, SmsMessage>>(
     {},
   );
+  const [pinCounts, setPinCounts] = useState<Record<string, number>>({});
+  const [dayClock, setDayClock] = useState(() => new Date());
   const [savingPin, setSavingPin] = useState(false);
   const pinLock = useRef(false);
 
@@ -83,6 +98,11 @@ export default function SmsReaderScreen() {
       setSavingPin(false);
     }
   }
+
+  useEffect(() => {
+    const timer = setInterval(() => setDayClock(new Date()), 60000);
+    return () => clearInterval(timer);
+  }, []);
 
   const goBack = useCallback(() => {
     if (page === 'inbox') {
@@ -127,10 +147,12 @@ export default function SmsReaderScreen() {
         }
         const savedPins = await getPinnedChats();
         const previews: Record<string, SmsMessage> = {};
+        const counts: Record<string, number> = {};
         if (page === 'inbox') {
           await Promise.all(
             savedPins.map(async sender => {
-              const latest = await getMessagesForAddress(sender, 1);
+              const latest = await getMessagesForAddress(sender, 0);
+              counts[sender] = latest.length;
               if (latest[0]) previews[sender] = latest[0];
             }),
           );
@@ -145,6 +167,8 @@ export default function SmsReaderScreen() {
           setMessages(list);
           setPins(savedPins);
           setPinPreviews(previews);
+          setPinCounts(counts);
+          setDayClock(new Date());
         }
       } catch (e) {
         if (active) {
@@ -233,7 +257,8 @@ export default function SmsReaderScreen() {
           <TextInput
             accessibilityLabel="Search sender name or phone number"
             placeholder="Sender name or phone number"
-            placeholderTextColor="#64748b"
+            placeholderTextColor="#665342"
+            selectionColor="#171411"
             value={query}
             onChangeText={setQuery}
             autoCapitalize="none"
@@ -248,7 +273,7 @@ export default function SmsReaderScreen() {
       )}
       {loading ? (
         <View style={styles.center}>
-          <ActivityIndicator size="large" />
+          <ActivityIndicator size="large" color="#171411" />
           <Text style={styles.meta}>Loading messages…</Text>
         </View>
       ) : error ? (
@@ -281,7 +306,12 @@ export default function SmsReaderScreen() {
                 accessibilityLabel={`Open chat with ${item.latest.address}`}
                 onPress={() => openConversation(item.latest.address)}
               >
-                <Text style={styles.address}>{item.latest.address}</Text>
+                <View style={styles.cardHeading}>
+                  <Text style={[styles.address, styles.senderHeading]}>
+                    {item.latest.address}
+                  </Text>
+                  <CountBadge label={`${item.count} messages`} />
+                </View>
                 <Text numberOfLines={2} style={styles.body}>
                   {item.latest.body}
                 </Text>
@@ -324,6 +354,11 @@ export default function SmsReaderScreen() {
                   <Text style={styles.premiumSubtitle}>
                     Pinned chats · {pins.length} · Swipe to browse
                   </Text>
+                  <View style={styles.legend}>
+                    <Text style={styles.legendToday}>● Today</Text>
+                    <Text style={styles.legendYesterday}>● Yesterday</Text>
+                    <Text style={styles.legendOlder}>● Older</Text>
+                  </View>
                   <ScrollView
                     horizontal
                     showsHorizontalScrollIndicator={false}
@@ -331,17 +366,19 @@ export default function SmsReaderScreen() {
                   >
                     {pins.map(sender => {
                       const preview = pinPreviews[sender];
-                      const today =
-                        !!preview &&
-                        new Date(preview.date).toDateString() ===
-                          new Date().toDateString();
-                      const ink = today ? styles.todayInk : styles.olderInk;
+                      const day = conversationDay(preview?.date, dayClock);
+                      const ink =
+                        day === 'older' ? styles.olderInk : styles.todayInk;
                       return (
                         <View
                           key={sender}
                           style={[
                             styles.pinnedCard,
-                            today ? styles.todayCard : styles.olderCard,
+                            day === 'today'
+                              ? styles.todayCard
+                              : day === 'yesterday'
+                              ? styles.yesterdayCard
+                              : styles.olderCard,
                           ]}
                         >
                           <Pressable
@@ -349,10 +386,17 @@ export default function SmsReaderScreen() {
                             accessibilityLabel={`Open pinned chat with ${sender}`}
                             onPress={() => openConversation(sender)}
                           >
+                            <CountBadge
+                              label={`${pinCounts[sender] || 0} messages`}
+                            />
                             <Text style={[styles.cardStatus, ink]}>
-                              {today
-                                ? '●  MESSAGE TODAY'
-                                : '○  NO MESSAGES TODAY'}
+                              {!preview
+                                ? '○  NO MESSAGES'
+                                : day === 'today'
+                                ? '●  TODAY'
+                                : day === 'yesterday'
+                                ? '●  YESTERDAY'
+                                : '●  OLDER'}
                             </Text>
                             <Text
                               numberOfLines={1}
@@ -397,7 +441,7 @@ export default function SmsReaderScreen() {
           ListEmptyComponent={
             <Text style={styles.empty}>No messages found.</Text>
           }
-          renderItem={({ item }) =>
+          renderItem={({ item, index }) =>
             page === 'inbox' ? (
               <Pressable
                 accessibilityRole="button"
@@ -405,6 +449,7 @@ export default function SmsReaderScreen() {
                 style={styles.row}
                 onPress={() => openConversation(item.address)}
               >
+                <CountBadge label={`#${index + 1} / ${messages.length}`} />
                 <MessageDetails message={item} />
               </Pressable>
             ) : (
@@ -414,6 +459,7 @@ export default function SmsReaderScreen() {
                   item.type === 2 ? styles.sent : styles.received,
                 ]}
               >
+                <CountBadge label={`#${index + 1} / ${messages.length}`} />
                 <MessageDetails message={item} />
                 <Text selectable style={styles.meta}>
                   Message ID: {item.id}
@@ -428,15 +474,33 @@ export default function SmsReaderScreen() {
 }
 
 const styles = StyleSheet.create({
+  cardHeading: { flexDirection: 'row', alignItems: 'center', gap: 8 },
+  senderHeading: { flex: 1 },
+  countBadge: {
+    alignSelf: 'flex-start',
+    backgroundColor: '#171411',
+    color: '#FFDBB0',
+    borderRadius: 12,
+    paddingHorizontal: 9,
+    paddingVertical: 4,
+    fontSize: 11,
+    fontWeight: '700',
+    marginBottom: 5,
+  },
+  legend: { flexDirection: 'row', flexWrap: 'wrap', gap: 16 },
+  legendToday: { color: '#70e000', fontSize: 12, fontWeight: '600' },
+  legendYesterday: { color: '#ffbc42', fontSize: 12, fontWeight: '600' },
+  legendOlder: { color: '#FFB099', fontSize: 12, fontWeight: '600' },
   premium: {
     padding: 12,
     gap: 10,
     borderRadius: 12,
-    backgroundColor: '#0f172a',
+    backgroundColor: '#171411',
+    backgroundImage: 'linear-gradient(135deg, #171411 0%, #5C3824 100%)',
     marginBottom: 16,
   },
-  premiumTitle: { fontSize: 20, fontWeight: '700', color: '#fff' },
-  premiumSubtitle: { fontSize: 12, color: '#cbd5e1' },
+  premiumTitle: { fontSize: 20, fontWeight: '700', color: '#FCF9EA' },
+  premiumSubtitle: { fontSize: 12, color: '#FCF9EA' },
   pinnedRow: { gap: 12, paddingBottom: 4 },
   pinnedCard: {
     width: 250,
@@ -445,9 +509,10 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: '#ffffff33',
   },
-  todayCard: { backgroundColor: '#31AAA9' },
-  olderCard: { backgroundColor: '#A82020' },
-  todayInk: { color: '#062c2c' },
+  todayCard: { backgroundColor: '#70e000' },
+  yesterdayCard: { backgroundColor: '#ffbc42' },
+  olderCard: { backgroundColor: '#c33d08' },
+  todayInk: { color: '#111111' },
   olderInk: { color: '#fff' },
   cardStatus: { fontSize: 10, fontWeight: '800', letterSpacing: 0.8 },
   cardSender: { fontSize: 16, fontWeight: '700', marginTop: 6 },
@@ -467,34 +532,36 @@ const styles = StyleSheet.create({
     padding: 10,
     marginTop: 8,
     borderRadius: 8,
-    backgroundColor: '#e0e7ff',
+    backgroundColor: '#FCF9EA',
   },
-  pinText: { fontWeight: '600', color: '#1e40af' },
-  screen: { flex: 1, backgroundColor: '#f8fafc' },
+  pinText: { fontWeight: '600', color: '#171411' },
+  screen: { flex: 1, backgroundColor: '#FCF9EA' },
   header: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: 10,
     padding: 16,
-    backgroundColor: '#fff',
+    backgroundColor: '#FCF9EA',
+    borderBottomWidth: 1,
+    borderBottomColor: '#E6BB8D',
   },
-  title: { flex: 1, fontSize: 21, fontWeight: '700', color: '#0f172a' },
+  title: { flex: 1, fontSize: 21, fontWeight: '700', color: '#171411' },
   button: {
-    backgroundColor: '#1d4ed8',
+    backgroundColor: '#171411',
     paddingVertical: 10,
     paddingHorizontal: 14,
     borderRadius: 8,
   },
-  buttonText: { color: '#fff', fontWeight: '600' },
+  buttonText: { color: '#FFDBB0', fontWeight: '600' },
   search: { padding: 16, gap: 6 },
   input: {
     borderWidth: 1,
-    borderColor: '#94a3b8',
+    borderColor: '#B89672',
     borderRadius: 8,
     padding: 12,
     fontSize: 16,
-    backgroundColor: '#fff',
-    color: '#0f172a',
+    backgroundColor: '#FFF3E5',
+    color: '#171411',
   },
   center: {
     flex: 1,
@@ -504,18 +571,18 @@ const styles = StyleSheet.create({
     gap: 16,
   },
   error: { color: '#b91c1c', textAlign: 'center' },
-  empty: { paddingVertical: 30, textAlign: 'center', color: '#475569' },
+  empty: { paddingVertical: 30, textAlign: 'center', color: '#514235' },
   list: { padding: 16, gap: 12, flexGrow: 1 },
   row: {
     padding: 14,
     borderRadius: 12,
-    backgroundColor: '#fff',
+    backgroundColor: '#FFF3E5',
     borderWidth: 1,
-    borderColor: '#e2e8f0',
+    borderColor: '#E6BB8D',
   },
-  sent: { marginLeft: 28, backgroundColor: '#dbeafe' },
+  sent: { marginLeft: 28, backgroundColor: '#F5C58E' },
   received: { marginRight: 28 },
-  address: { fontWeight: '600', fontSize: 15, color: '#0f172a' },
-  body: { fontSize: 15, marginTop: 6, color: '#1e293b' },
-  meta: { fontSize: 12, color: '#475569', marginTop: 6 },
+  address: { fontWeight: '600', fontSize: 15, color: '#171411' },
+  body: { fontSize: 15, marginTop: 6, color: '#211B16' },
+  meta: { fontSize: 12, color: '#514235', marginTop: 6 },
 });
